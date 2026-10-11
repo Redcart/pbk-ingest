@@ -99,4 +99,3 @@ jobs:
           --uri "https://run.googleapis.com/v2/projects/${{ env.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/jobs/$JOB:run" \
           --http-method POST \
           --oauth-service-account-email ${{ env.SERVICE_ACCOUNT_EXTRACT }}
-
