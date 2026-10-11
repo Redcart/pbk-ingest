@@ -24,7 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
-    needs: pre-commit
     steps:
     - uses: actions/checkout@v7
     - uses: astral-sh/setup-uv@v10.3.0
