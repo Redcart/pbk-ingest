@@ -1,0 +1,110 @@
+name: 'CD'
+
+# dev: CI + build image + deploy.  stg: CI + deploy the image built on dev (same SHA).
+on:
+  push:
+    branches: ["dev", "stg"]
+
+jobs:
+  ci:
+    permissions:
+      contents: 'read'
+    uses: ./.github/workflows/reusable_wf.yml
+    with:
+      uv_version: ${{ vars.UV_VERSION }}
+
+  deploy:
+    environment: ${{ github.ref_name }}  # dev or stg
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    needs: ci
+
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCS_BUCKET: ${{ vars.GCS_BUCKET_NAME }}
+      GAR_PROJECT_ID: ${{ vars.GAR_PROJECT_ID }}
+      PUBSUB_TOPIC: ${{ vars.PUBSUB_TOPIC }}
+      SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
+      SERVICE_ACCOUNT_EXTRACT: ${{ vars.SERVICE_ACCOUNT_EXTRACT }}
+      SERVICE_ACCOUNT_LOAD: ${{ vars.SERVICE_ACCOUNT_LOAD }}
+      WIF_POOL_ID: ${{ vars.WIF_POOL_ID }}
+      WIF_POOL_PROVIDER: ${{ vars.WIF_POOL_PROVIDER }}
+      PROJECT: ${{ vars.PROJECT }}
+      STREAM: ${{ vars.STREAM }}
+      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GAR_PROJECT_ID }}/${{ vars.PROJECT }}-${{ vars.STREAM }}/${{ vars.PROJECT }}-${{ vars.STREAM }}
+
+    steps:
+
+    - uses: actions/checkout@v7
+
+    - uses: google-github-actions/auth@v3
+      with:
+        token_format: access_token
+        workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL_ID }}/providers/${{ env.WIF_POOL_PROVIDER }}'
+        service_account: ${{ env.SERVICE_ACCOUNT_GH }}
+        access_token_lifetime: 300s
+
+    - uses: google-github-actions/setup-gcloud@v3
+
+    - uses: astral-sh/setup-uv@v10
+      with:
+        version: ${{ vars.UV_VERSION }}
+
+    - name: Configure Docker for Artifact Registry
+      run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+    # Build once on dev, promote by SHA to stg
+    - name: Build and push
+      if: github.ref_name == 'dev'
+      run: |
+        docker build -t ${{ env.IMAGE }}:${{ github.sha }} .
+        docker push ${{ env.IMAGE }}:${{ github.sha }}
+
+    - name: Check image
+      if: github.ref_name != 'dev'
+      run: gcloud artifacts docker images describe ${{ env.IMAGE }}:${{ github.sha }}
+
+    - name: Deploy Cloud Run Job (extract)
+      run: |
+        gcloud run jobs deploy ${{ env.PROJECT }}-${{ env.STREAM }}-extract \
+          --image ${{ env.IMAGE }}:${{ github.sha }} \
+          --region ${{ env.GCP_REGION }} \
+          --memory 2Gi --cpu 1 \
+          --task-timeout 240s --max-retries 0 \
+          --service-account ${{ env.SERVICE_ACCOUNT_EXTRACT }} \
+          --set-env-vars GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }},GCS_BUCKET=${{ env.GCS_BUCKET }},PUBSUB_TOPIC=${{ env.PUBSUB_TOPIC }},API_MASTER_URL=https://rest.publibike.ch/v1/public/all/stations
+
+    - name: Deploy Cloud Function (load)
+      run: |
+        # Cloud Functions expects main.py + requirements.txt: stage them
+        mkdir build_fn
+        cp -r src build_fn/src
+        cp main_load.py build_fn/main.py
+        uv export --no-dev --no-hashes --no-emit-project --format requirements-txt > build_fn/requirements.txt
+        gcloud functions deploy ${{ env.PROJECT }}-${{ env.STREAM }}-load \
+          --gen2 \
+          --region ${{ env.GCP_REGION }} \
+          --runtime python314 \
+          --source build_fn \
+          --entry-point load \
+          --trigger-topic ${{ env.PUBSUB_TOPIC }} \
+          --retry \
+          --service-account ${{ env.SERVICE_ACCOUNT_LOAD }} \
+          --trigger-service-account ${{ env.SERVICE_ACCOUNT_LOAD }} \
+          --set-env-vars GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }}
+
+    - name: Deploy Cloud Scheduler (every 5 min)
+      run: |
+        JOB=${{ env.PROJECT }}-${{ env.STREAM }}-extract
+        ACTION=$(gcloud scheduler jobs describe $JOB --location ${{ env.GCP_REGION }} >/dev/null 2>&1 && echo update || echo create)
+        gcloud scheduler jobs $ACTION http $JOB \
+          --location ${{ env.GCP_REGION }} \
+          --schedule "*/5 * * * *" --time-zone "Etc/UTC" \
+          --uri "https://run.googleapis.com/v2/projects/${{ env.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/jobs/$JOB:run" \
+          --http-method POST \
+          --oauth-service-account-email ${{ env.SERVICE_ACCOUNT_EXTRACT }}
+

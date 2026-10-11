@@ -1,0 +1,16 @@
+# GCP
+export GCP_PROJECT_ID=
+export GCP_REGION=europe-west6
+export GOOGLE_CLOUD_PROJECT=$GCP_PROJECT_ID  # default project for Google client libraries
+export GCS_BUCKET=
+export BQ_DATASET=bronze
+
+# PubliBike API (stations come from `velospot.responseData`, each with its own detailsRoute)
+export API_MASTER_URL=https://rest.publibike.ch/v1/public/all/stations
+
+# Pub/Sub
+export PUBSUB_TOPIC=pbk-load
+
+# Extraction settings
+export MAX_CONCURRENT_REQUESTS=10
+export REQUEST_TIMEOUT_SECONDS=30

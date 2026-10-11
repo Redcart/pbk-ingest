@@ -1,0 +1,9 @@
+.git
+.venv
+.github
+archive
+tests
+**/__pycache__
+.envrc
+.envrc.example
+infos.txt

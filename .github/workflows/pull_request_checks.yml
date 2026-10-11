@@ -1,0 +1,13 @@
+name: 'PR Checks'
+
+on:
+  pull_request:
+    branches: ["dev", "stg", "prd"]
+
+jobs:
+  ci:
+    permissions:
+      contents: 'read'
+    uses: ./.github/workflows/reusable_wf.yml
+    with:
+      uv_version: ${{ vars.UV_VERSION }}

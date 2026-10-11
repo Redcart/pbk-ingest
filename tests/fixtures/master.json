@@ -1,0 +1,48 @@
+{
+ "velospot": {
+  "responseData": [
+   {
+    "station_name": "A l'impr\u00e9vu - Gare CFF - La Tour-de-Peilz",
+    "station_address": "Av. de la Gare 5, 1814 La Tour-de-Peilz, Suisse",
+    "encryptNetworkId": "a0plWVF5a3k2T2RuNWs2LzhYMTd3Zz09",
+    "station_id": "eTNFSGwwTHdZNUpqNVpwWjMrOHZGQT09",
+    "detailsRoute": "https://www.velospot.info/customer/public/getStationInfo/a0plWVF5a3k2T2RuNWs2LzhYMTd3Zz09/eTNFSGwwTHdZNUpqNVpwWjMrOHZGQT09",
+    "totalBike": 3,
+    "totalNonElectricalBike": 1,
+    "totalElectricalBike": 2,
+    "totalCargoBike": 0,
+    "totalEscooter": 0,
+    "totalGlider": 0,
+    "mapIconFullpath": "https://www.velospot.info/customer/public/images/stationIcons/theme_1/stationAvailableWithBike.png",
+    "stationColor": "#C41415",
+    "lat": "46.45502050495612",
+    "lng": "6.858998222337274",
+    "stationNumber": "600331",
+    "mapIcon": "stationAvailableWithBike.png"
+   },
+   {
+    "station_name": "Allschwilerstrasse 106 - Basel",
+    "station_address": "Allschwilerstrasse 106, 4055 Basel, Switzerland",
+    "encryptNetworkId": "a0plWVF5a3k2T2RuNWs2LzhYMTd3Zz09",
+    "station_id": "L0taUHM5OFlQOVoyV294bkNxMElrZz09",
+    "detailsRoute": "https://www.velospot.info/customer/public/getStationInfo/a0plWVF5a3k2T2RuNWs2LzhYMTd3Zz09/L0taUHM5OFlQOVoyV294bkNxMElrZz09",
+    "totalBike": 0,
+    "totalNonElectricalBike": 0,
+    "totalElectricalBike": 0,
+    "totalCargoBike": 0,
+    "totalEscooter": 0,
+    "totalGlider": 0,
+    "mapIconFullpath": "https://www.velospot.info/customer/public/images/stationIcons/theme_1/stationAvailableNoBike.png",
+    "stationColor": "#C41415",
+    "lat": "47.557281065920485",
+    "lng": "7.566762439881116",
+    "stationNumber": "400849",
+    "mapIcon": "stationAvailableNoBike.png"
+   }
+  ],
+  "responseStatus": {
+   "STATUS": "SUCCESS"
+  }
+ },
+ "publibike": {}
+}

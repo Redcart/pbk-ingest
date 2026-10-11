@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  workflow_call:
+    inputs:
+      uv_version:
+        required: true
+        type: string
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+    steps:
+    - uses: actions/checkout@v7
+    - uses: astral-sh/setup-uv@v10
+      with:
+        version: ${{ inputs.uv_version }}
+    - run: make install
+    - run: make pre-commit
+
+  tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+    needs: pre-commit
+    steps:
+    - uses: actions/checkout@v7
+    - uses: astral-sh/setup-uv@v10
+      with:
+        version: ${{ inputs.uv_version }}
+    - run: make install
+    # integration tests (real GCP / PubliBike) are not run in CI
+    - run: uv run pytest tests -m "not integration_test"
