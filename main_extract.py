@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 from datetime import UTC, datetime
 
 from google.cloud import pubsub_v1
@@ -33,7 +34,7 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
     logging.getLogger("httpx").setLevel(
         logging.WARNING
     )  # one INFO line per station otherwise

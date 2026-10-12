@@ -5,6 +5,18 @@ on:
   push:
     branches: ["dev", "stg"]
 
+# Repository-scope variables (same in every environment) can live at workflow level.
+# Environment-scope ones (project, service accounts, bucket) only resolve inside a job
+# that declares `environment:`, so they stay in the jobs.
+env:
+  GCP_REGION: ${{ vars.GCP_REGION }}
+  PUBSUB_TOPIC: ${{ vars.PUBSUB_TOPIC }}
+  WIF_POOL_ID: ${{ vars.WIF_POOL_ID }}
+  WIF_POOL_PROVIDER: ${{ vars.WIF_POOL_PROVIDER }}
+  PROJECT: ${{ vars.PROJECT }}
+  STREAM: ${{ vars.STREAM }}
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GAR_PROJECT_ID }}/${{ vars.PROJECT }}-${{ vars.STREAM }}/${{ vars.PROJECT }}-${{ vars.STREAM }}
+
 jobs:
   ci:
     permissions:
@@ -24,16 +36,9 @@ jobs:
     env:
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
-      GCP_REGION: ${{ vars.GCP_REGION }}
-      PUBSUB_TOPIC: ${{ vars.PUBSUB_TOPIC }}
       SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
-      WIF_POOL_ID: ${{ vars.WIF_POOL_ID }}
-      WIF_POOL_PROVIDER: ${{ vars.WIF_POOL_PROVIDER }}
-      PROJECT: ${{ vars.PROJECT }}
-      STREAM: ${{ vars.STREAM }}
       GCS_BUCKET: ${{ vars.GCS_BUCKET_NAME }}
       SERVICE_ACCOUNT_EXTRACT: ${{ vars.SERVICE_ACCOUNT_EXTRACT }}
-      IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GAR_PROJECT_ID }}/${{ vars.PROJECT }}-${{ vars.STREAM }}/${{ vars.PROJECT }}-${{ vars.STREAM }}
 
     steps:
     - uses: actions/checkout@v7
@@ -69,7 +74,10 @@ jobs:
           --memory 2Gi --cpu 1 \
           --task-timeout 240s --max-retries 0 \
           --service-account ${{ env.SERVICE_ACCOUNT_EXTRACT }} \
-          --set-env-vars GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }},GCS_BUCKET=${{ env.GCS_BUCKET }},PUBSUB_TOPIC=${{ env.PUBSUB_TOPIC }},API_MASTER_URL=https://rest.publibike.ch/v1/public/all/stations
+          --set-env-vars GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }} \
+          --set-env-vars GCS_BUCKET=${{ env.GCS_BUCKET }} \
+          --set-env-vars PUBSUB_TOPIC=${{ env.PUBSUB_TOPIC }} \
+          --set-env-vars API_MASTER_URL=https://rest.publibike.ch/v1/public/all/stations
 
     - name: Deploy Cloud Scheduler (every 5 min)
       run: |
@@ -93,13 +101,7 @@ jobs:
     env:
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
-      GCP_REGION: ${{ vars.GCP_REGION }}
-      PUBSUB_TOPIC: ${{ vars.PUBSUB_TOPIC }}
       SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
-      WIF_POOL_ID: ${{ vars.WIF_POOL_ID }}
-      WIF_POOL_PROVIDER: ${{ vars.WIF_POOL_PROVIDER }}
-      PROJECT: ${{ vars.PROJECT }}
-      STREAM: ${{ vars.STREAM }}
       SERVICE_ACCOUNT_LOAD: ${{ vars.SERVICE_ACCOUNT_LOAD }}
 
     steps:
@@ -118,13 +120,16 @@ jobs:
       with:
         version: ${{ vars.UV_VERSION }}
 
-    - name: Deploy Cloud Function (load)
+    # Cloud Functions expects main.py + requirements.txt at the root of the source
+    - name: Stage function sources
       run: |
-        # Cloud Functions expects main.py + requirements.txt: stage them
         mkdir build_fn
         cp -r src build_fn/src
         cp main_load.py build_fn/main.py
         uv export --no-dev --no-hashes --no-emit-project --format requirements-txt > build_fn/requirements.txt
+
+    - name: Deploy Cloud Function (load)
+      run: |
         gcloud functions deploy ${{ env.PROJECT }}-${{ env.STREAM }}-load \
           --gen2 \
           --region ${{ env.GCP_REGION }} \
@@ -133,6 +138,7 @@ jobs:
           --entry-point load \
           --trigger-topic ${{ env.PUBSUB_TOPIC }} \
           --retry \
+          --memory 512Mi \
           --service-account ${{ env.SERVICE_ACCOUNT_LOAD }} \
           --trigger-service-account ${{ env.SERVICE_ACCOUNT_LOAD }} \
           --build-service-account projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/${{ env.SERVICE_ACCOUNT_GH }} \

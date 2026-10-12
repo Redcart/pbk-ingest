@@ -8,6 +8,8 @@ from cloudevents.http import CloudEvent
 from src.load import Load
 from src.settings import LoadSettings
 
+# at import time: the deployed function never runs __main__, and Python's root logger drops INFO
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 
@@ -36,5 +38,4 @@ def load(cloud_event: CloudEvent) -> None:
 
 if __name__ == "__main__":
     # local run: python main_load.py gs://bucket/stations/raw_data/<date>/<time>/data.json
-    logging.basicConfig(level=logging.INFO)
     load_snapshot(sys.argv[1])
