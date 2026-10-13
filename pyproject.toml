@@ -30,4 +30,4 @@ asyncio_mode = "auto"
 markers = ["integration_test: hits real GCP / PubliBike (deselect in CI)"]
 
 [tool.ruff]
-extend-exclude = ["archive"]
+extend-exclude = ["archive", "*.md"]  # docs hold illustrative snippets, not code to format

@@ -16,6 +16,7 @@ Cloud Scheduler -> Cloud Run Job (main_extract.py) -> GCS -> Pub/Sub (pbk-load) 
 ```bash
 cp .envrc.example .envrc && direnv allow
 make install
+make hooks       # one-time: run the pre-commit hooks on every git commit
 make tests
 make ruff
 make extract     # real run: writes to the bucket and publishes to Pub/Sub of $GCP_PROJECT_ID

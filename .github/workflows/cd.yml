@@ -1,6 +1,6 @@
 name: 'CD'
 
-# dev: CI + build image + deploy.  stg: CI + deploy the image built on dev (same SHA).
+# 1) CI  2) build + push image (dev) / check it exists (stg)  3) deploy Cloud Run job, function and scheduler in parallel
 on:
   push:
     branches: ["dev", "stg"]
@@ -18,6 +18,7 @@ env:
   IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GAR_PROJECT_ID }}/${{ vars.PROJECT }}-${{ vars.STREAM }}/${{ vars.PROJECT }}-${{ vars.STREAM }}
 
 jobs:
+  # 1) CI
   ci:
     permissions:
       contents: 'read'
@@ -25,8 +26,8 @@ jobs:
     with:
       uv_version: ${{ vars.UV_VERSION }}
 
-  deploy-extract:
-    # Cloud Run Job + Cloud Scheduler (runs in parallel with deploy-load)
+  build-image:
+    # 2) build and push the image (dev); on stg only check it exists
     environment: ${{ github.ref_name }}  # dev or stg
     runs-on: ubuntu-latest
     permissions:
@@ -34,11 +35,8 @@ jobs:
       id-token: 'write'
     needs: ci
     env:
-      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
       SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
-      GCS_BUCKET: ${{ vars.GCS_BUCKET_NAME }}
-      SERVICE_ACCOUNT_EXTRACT: ${{ vars.SERVICE_ACCOUNT_EXTRACT }}
 
     steps:
     - uses: actions/checkout@v7
@@ -66,6 +64,33 @@ jobs:
       if: github.ref_name != 'dev'
       run: gcloud artifacts docker images describe ${{ env.IMAGE }}:${{ github.sha }}
 
+  deploy-cloud-run:
+    # 3) deploy, in parallel with deploy-cloud-function and deploy-scheduler
+    environment: ${{ github.ref_name }}  # dev or stg
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    needs: [build-image]
+    env:
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+      SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCS_BUCKET: ${{ vars.GCS_BUCKET_NAME }}
+      SERVICE_ACCOUNT_EXTRACT: ${{ vars.SERVICE_ACCOUNT_EXTRACT }}
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: google-github-actions/auth@v3
+      with:
+        token_format: access_token
+        workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL_ID }}/providers/${{ env.WIF_POOL_PROVIDER }}'
+        service_account: ${{ env.SERVICE_ACCOUNT_GH }}
+        access_token_lifetime: 300s
+
+    - uses: google-github-actions/setup-gcloud@v3
+
     - name: Deploy Cloud Run Job (extract)
       run: |
         gcloud run jobs deploy ${{ env.PROJECT }}-${{ env.STREAM }}-extract \
@@ -79,29 +104,18 @@ jobs:
           --set-env-vars PUBSUB_TOPIC=${{ env.PUBSUB_TOPIC }} \
           --set-env-vars API_MASTER_URL=https://rest.publibike.ch/v1/public/all/stations
 
-    - name: Deploy Cloud Scheduler (every 5 min)
-      run: |
-        JOB=${{ env.PROJECT }}-${{ env.STREAM }}-extract
-        ACTION=$(gcloud scheduler jobs describe $JOB --location ${{ env.GCP_REGION }} >/dev/null 2>&1 && echo update || echo create)
-        gcloud scheduler jobs $ACTION http $JOB \
-          --location ${{ env.GCP_REGION }} \
-          --schedule "*/5 * * * *" --time-zone "Etc/UTC" \
-          --uri "https://run.googleapis.com/v2/projects/${{ env.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/jobs/$JOB:run" \
-          --http-method POST \
-          --oauth-service-account-email ${{ env.SERVICE_ACCOUNT_EXTRACT }}
-
-  deploy-load:
-    # Cloud Function (runs in parallel with deploy-extract)
+  deploy-cloud-function:
+    # 3) deploy, in parallel with deploy-cloud-run and deploy-scheduler
     environment: ${{ github.ref_name }}  # dev or stg
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
       id-token: 'write'
-    needs: ci
+    needs: [build-image]
     env:
-      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
       SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       SERVICE_ACCOUNT_LOAD: ${{ vars.SERVICE_ACCOUNT_LOAD }}
 
     steps:
@@ -143,3 +157,40 @@ jobs:
           --trigger-service-account ${{ env.SERVICE_ACCOUNT_LOAD }} \
           --build-service-account projects/${{ env.GCP_PROJECT_ID }}/serviceAccounts/${{ env.SERVICE_ACCOUNT_GH }} \
           --set-env-vars GCP_PROJECT_ID=${{ env.GCP_PROJECT_ID }}
+
+  deploy-scheduler:
+    # 3) deploy, in parallel with deploy-cloud-run and deploy-cloud-function (starts the Cloud Run job)
+    environment: ${{ github.ref_name }}  # dev or stg
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    needs: [build-image]
+    env:
+      GCP_PROJECT_NUMBER: ${{ vars.GCP_PROJECT_NUMBER }}
+      SERVICE_ACCOUNT_GH: ${{ vars.SERVICE_ACCOUNT_GH }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      SERVICE_ACCOUNT_EXTRACT: ${{ vars.SERVICE_ACCOUNT_EXTRACT }}
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: google-github-actions/auth@v3
+      with:
+        token_format: access_token
+        workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL_ID }}/providers/${{ env.WIF_POOL_PROVIDER }}'
+        service_account: ${{ env.SERVICE_ACCOUNT_GH }}
+        access_token_lifetime: 300s
+
+    - uses: google-github-actions/setup-gcloud@v3
+
+    - name: Deploy Cloud Scheduler (every 5 min)
+      run: |
+        JOB=${{ env.PROJECT }}-${{ env.STREAM }}-extract
+        ACTION=$(gcloud scheduler jobs describe $JOB --location ${{ env.GCP_REGION }} >/dev/null 2>&1 && echo update || echo create)
+        gcloud scheduler jobs $ACTION http $JOB \
+          --location ${{ env.GCP_REGION }} \
+          --schedule "*/5 * * * *" --time-zone "Etc/UTC" \
+          --uri "https://run.googleapis.com/v2/projects/${{ env.GCP_PROJECT_ID }}/locations/${{ env.GCP_REGION }}/jobs/$JOB:run" \
+          --http-method POST \
+          --oauth-service-account-email ${{ env.SERVICE_ACCOUNT_EXTRACT }}

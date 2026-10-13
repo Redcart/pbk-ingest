@@ -38,3 +38,8 @@ login:
 load:
 	@test -n "$(URI)" || (echo "usage: make load URI=gs://bucket/path/data.json" && exit 1)
 	@uv run python main_load.py $(URI)
+
+# one-time per clone: run the pre-commit hooks automatically on `git commit`
+.PHONY: hooks
+hooks:
+	@uv run pre-commit install
