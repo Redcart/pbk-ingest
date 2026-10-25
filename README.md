@@ -26,5 +26,5 @@ make extract     # real run: writes to the bucket and publishes to Pub/Sub of $G
 
 ## Deploy
 
-`.github/workflows`: PR checks (CI only), `cd.yml` (push to `dev`/`stg`: CI + deploy; image built on dev, promoted by SHA), `release.yml` (tag `v*.*.*`: deploy to prd).
+`.github/workflows`: PR checks (CI only), `cd.yml` (push to `dev`/`stg`: CI → build image on dev, promoted by SHA to stg → deploy Cloud Run job, function and scheduler in parallel), `release.yml` (tag `v*.*.*`: CI → tag the dev-built image → the same three deploys on prd).
 Infrastructure (SAs, topic, bucket, dataset, WIF) comes from pbk-infra; variables from pbk-variables.

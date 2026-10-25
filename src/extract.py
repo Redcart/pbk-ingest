@@ -13,6 +13,8 @@ from src.settings import ExtractSettings
 logger = logging.getLogger(__name__)
 
 SOURCE = "publibike"
+FETCH_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 0.5
 
 
 class Extract:
@@ -35,14 +37,41 @@ class Extract:
             raise ValueError("master endpoint returned no stations")
         return stations
 
+    async def fetch_page(
+        self, client: httpx.AsyncClient, semaphore: asyncio.Semaphore, url: str
+    ) -> str:
+        """GET one page, retrying transport errors and 5xx (one flaky page must not kill a run)."""
+        for attempt in range(1, FETCH_ATTEMPTS + 1):
+            try:
+                async with semaphore:
+                    response = await client.get(url)
+                if response.status_code < 500:
+                    response.raise_for_status()
+                    return response.text
+                error: Exception = httpx.HTTPStatusError(
+                    f"server error {response.status_code}",
+                    request=response.request,
+                    response=response,
+                )
+            except httpx.TransportError as exc:
+                error = exc
+            if attempt == FETCH_ATTEMPTS:
+                raise error
+            logger.warning(
+                "GET %s failed (%r), attempt %d/%d",
+                url,
+                error,
+                attempt,
+                FETCH_ATTEMPTS,
+            )
+            await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
+        raise AssertionError("unreachable")
+
     async def get_station_data(
         self, client: httpx.AsyncClient, semaphore: asyncio.Semaphore, master: dict
     ) -> tuple[dict, str]:
         """Fetch one station page. Return (merged station, raw response body)."""
-        async with semaphore:
-            response = await client.get(master["detailsRoute"])
-        response.raise_for_status()
-        body = response.text
+        body = await self.fetch_page(client, semaphore, master["detailsRoute"])
         status = parse_station_response(body)
 
         expected = master.get("totalBike")

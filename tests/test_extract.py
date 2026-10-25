@@ -28,6 +28,11 @@ def handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404)
 
 
+@pytest.fixture(autouse=True)
+def no_backoff(monkeypatch):
+    monkeypatch.setattr("src.extract.RETRY_BACKOFF_SECONDS", 0)
+
+
 @pytest.fixture
 def settings():
     return ExtractSettings(
@@ -62,6 +67,47 @@ async def test_http_error_fails_the_run(settings):
 
     with pytest.raises(httpx.HTTPStatusError):
         await make_extract(settings, failing).collect_all_stations(NOW)
+
+
+async def test_transient_errors_are_retried(settings):
+    calls = {}
+
+    def flaky(request):
+        url = str(request.url)
+        calls[url] = calls.get(url, 0) + 1
+        if url != MASTER_URL and calls[url] == 1:
+            raise httpx.RemoteProtocolError("Server disconnected", request=request)
+        if url != MASTER_URL and calls[url] == 2:
+            return httpx.Response(503)
+        return handler(request)
+
+    snapshot, _ = await make_extract(settings, flaky).collect_all_stations(NOW)
+
+    assert len(snapshot["stations"]) == 2
+
+
+async def test_persistent_transport_error_fails_the_run(settings):
+    def dropping(request):
+        if str(request.url) == MASTER_URL:
+            return handler(request)
+        raise httpx.RemoteProtocolError("Server disconnected", request=request)
+
+    with pytest.raises(httpx.RemoteProtocolError):
+        await make_extract(settings, dropping).collect_all_stations(NOW)
+
+
+async def test_client_error_is_not_retried(settings):
+    calls = []
+
+    def missing(request):
+        calls.append(str(request.url))
+        return (
+            handler(request) if str(request.url) == MASTER_URL else httpx.Response(404)
+        )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await make_extract(settings, missing).collect_all_stations(NOW)
+    assert len(calls) == 3  # master + one attempt per station
 
 
 async def test_parser_failure_fails_the_run(settings):
